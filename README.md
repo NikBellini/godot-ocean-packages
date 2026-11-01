@@ -88,6 +88,10 @@ Open this repository's [project.godot](project.godot) in Godot and run [demo.tsc
 
 The demo's procedural sky, sun, brighter water colors, and distance fog create a sunny ocean scene. Fog blends the distant water into the horizon before the mesh ends. Adjust the demo's `WorldEnvironment`, `Sun`, and ocean instance to change this appearance.
 
+The game starts **maximized**, fitting the current monitor's available area. Its rendering resolution follows the actual window size, including resizing, with the 3D render scale at 100%. For edge-to-edge native-resolution play, change **Project Settings > Display > Window > Size > Mode** to **Fullscreen**. The window mode controls its desktop size; the existing **Canvas Items** stretch mode and **Expand** aspect setting control how content adapts inside it.
+
+When playing inside the editor's Game view, choose **Stretch to Fit** to fill that view. To test the native maximized or fullscreen window, turn off **Embed Game on Next Play** in the Game view menu before running the project.
+
 Use **WASD** to choose a movement direction relative to the camera. The boat turns toward that direction and applies forward thrust as it lines up. Releasing the keys cuts the engine command, letting water resistance slow the boat. Hold the **right mouse button** and move the mouse to orbit around the boat. Release the button or press **Escape** to free the cursor.
 
 The example boat is [demo_assets/boat/boat.tscn](demo_assets/boat/boat.tscn). Copy `demo_assets/boat/` as well if you want to reuse that scene and its model in another project. Visual results depend on your lighting, environment, and rendering settings.
@@ -279,6 +283,8 @@ To set up a custom boat:
 6. For player control, add a `PlayerInput` child with [boat_player_input.gd](packages/boat_system/utils/boat_player_input.gd). Assign its **Engine**, or keep the engine node named `Engine`. Configure the input actions listed [below](#player-controls).
 7. For a follow camera, attach [boat_follow_camera.gd](packages/boat_system/utils/boat_follow_camera.gd) to an active `Camera3D` and assign its **Target** to the body. `PlayerInput` can use that active camera automatically.
 8. Select `Pontoons` and use its debug preview to tune pontoon size, placement, lift, and damping. Buoyancy settings live on this node, and thrust placement is controlled by the `Engine` node's transform.
+
+**Stability tip:** To help prevent the boat from flipping, select the root `RigidBody3D`, set **Center Of Mass Mode** to **Custom**, and lower **Center Of Mass > Y**. A negative Y value places the center of mass below the body's origin, helping the hull stay upright. Adjust it gradually to suit the hull's size and pontoon placement.
 
 ### Floating simple objects
 

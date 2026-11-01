@@ -41,19 +41,23 @@ func init_gpu(num_cascades : int) -> void:
 	var unpack_set := context.create_descriptor_set([descriptors[&'displacement_map'], descriptors[&'normal_map']], fft_unpack_shader, 0)
 
 	# --- COMPUTE PIPELINE CREATION ---
-	pipelines[&'spectrum_compute'] = context.create_pipeline([map_size/16, map_size/16, 1], [spectrum_write_set], spectrum_compute_shader)
-	pipelines[&'spectrum_modulate'] = context.create_pipeline([map_size/16, map_size/16, 1], [spectrum_read_set, fft_buffer_set], spectrum_modulate_shader)
-	pipelines[&'fft_butterfly'] = context.create_pipeline([map_size/2/64, num_fft_stages, 1], [fft_butterfly_set], fft_butterfly_shader)
+	# Map sizes are powers of two. Shifts explicitly calculate integer workgroup counts.
+	var groups_16 := map_size >> 4
+	var groups_32 := map_size >> 5
+	var butterfly_groups := map_size >> 7 # Two samples per thread, 64 threads per group.
+	pipelines[&'spectrum_compute'] = context.create_pipeline([groups_16, groups_16, 1], [spectrum_write_set], spectrum_compute_shader)
+	pipelines[&'spectrum_modulate'] = context.create_pipeline([groups_16, groups_16, 1], [spectrum_read_set, fft_buffer_set], spectrum_modulate_shader)
+	pipelines[&'fft_butterfly'] = context.create_pipeline([butterfly_groups, num_fft_stages, 1], [fft_butterfly_set], fft_butterfly_shader)
 	pipelines[&'fft_compute'] = context.create_pipeline([1, map_size, 4], [fft_compute_set], fft_compute_shader)
-	pipelines[&'transpose'] = context.create_pipeline([map_size/32, map_size/32, 4], [fft_compute_set], transpose_shader)
-	pipelines[&'fft_unpack'] = context.create_pipeline([map_size/16, map_size/16, 1], [unpack_set, fft_buffer_set], fft_unpack_shader)
+	pipelines[&'transpose'] = context.create_pipeline([groups_32, groups_32, 4], [fft_compute_set], transpose_shader)
+	pipelines[&'fft_unpack'] = context.create_pipeline([groups_16, groups_16, 1], [unpack_set, fft_buffer_set], fft_unpack_shader)
 
 	# We only need to generate butterfly factors once for each map_size.
 	var compute_list := context.compute_list_begin()
 	pipelines[&'fft_butterfly'].call(context, compute_list)
 	context.compute_list_end()
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	# Update one cascade each frame for load balancing.
 	if pass_num_cascades_remaining == 0: return
 	pass_num_cascades_remaining -= 1

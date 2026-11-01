@@ -165,12 +165,12 @@ func _refresh_bounds(contact: Contact) -> void:
 	var collider := contact.body as CollisionObject3D
 	if collider == null:
 		return # A marker-only interactor can deliberately work without a collider.
-	for owner in collider.get_shape_owners():
-		if collider.is_shape_owner_disabled(owner):
+	for shape_owner_id in collider.get_shape_owners():
+		if collider.is_shape_owner_disabled(shape_owner_id):
 			continue
-		var local_transform := collider.shape_owner_get_transform(owner)
-		for index in range(collider.shape_owner_get_shape_count(owner)):
-			var shape := collider.shape_owner_get_shape(owner, index)
+		var local_transform := collider.shape_owner_get_transform(shape_owner_id)
+		for index in range(collider.shape_owner_get_shape_count(shape_owner_id)):
+			var shape := collider.shape_owner_get_shape(shape_owner_id, index)
 			var mesh := shape.get_debug_mesh()
 			if mesh == null:
 				continue
@@ -282,8 +282,8 @@ func _render_contact(contact: Contact, delta: float) -> void:
 	if _enabled(contact) and contact.pending_impact > 0.0:
 		# Physics queues one impact. Consume it here once, rather than every rendered frame.
 		var multiplier: float = contact.settings.strength if is_instance_valid(contact.settings) else 1.0
-		var count := _get_impact_splash_count(contact.pending_impact, contact.radius, multiplier)
-		_emit_spray(contact.impact_position, contact.velocity, contact.radius, count, contact.pending_impact / ocean.interaction_impact_speed)
+		var impact_count := _get_impact_splash_count(contact.pending_impact, contact.radius, multiplier)
+		_emit_spray(contact.impact_position, contact.velocity, contact.radius, impact_count, contact.pending_impact / ocean.interaction_impact_speed)
 		contact.pending_impact = 0.0
 	if not _enabled(contact) or not contact.wet:
 		# End deposition immediately. Previously painted foam stays on the ocean and fades.
@@ -477,7 +477,10 @@ func _bind_field() -> void:
 		# the same shader settings repeatedly; only the moving origin always updates.
 		_bound_settings = settings
 		water_material.set_shader_parameter(&"interactions_enabled", ocean.interaction_enabled)
-		water_material.set_shader_parameter(&"interaction_field", field.get_texture() if _field_ready else _empty_field)
+		var field_texture: Texture2D = _empty_field
+		if _field_ready:
+			field_texture = field.get_texture()
+		water_material.set_shader_parameter(&"interaction_field", field_texture)
 		water_material.set_shader_parameter(&"interaction_area_size", area_size)
 		water_material.set_shader_parameter(&"interaction_foam_strength", ocean.interaction_foam_amount)
 		water_material.set_shader_parameter(&"interaction_contact_foam", ocean.interaction_contact_foam)
