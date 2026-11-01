@@ -1,6 +1,6 @@
 # godot-ocean-packages
 
-https://github.com/user-attachments/assets/60019bff-a44c-491b-b4c8-ed0704908fe7
+https://github.com/user-attachments/assets/de1e4916-6267-4e3d-b868-490147506090
 
 Two reusable packages for building ocean scenes in **Godot 4.7**:
 
