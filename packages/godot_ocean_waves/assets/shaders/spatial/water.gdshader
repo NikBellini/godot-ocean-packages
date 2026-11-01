@@ -22,6 +22,8 @@ uniform vec3 depth_color_consumption = vec3(7.5, 22.0, 38.0);
 uniform float roughness : hint_range(0.0, 1.0) = 0.4;
 uniform float normal_strength : hint_range(0.0, 1.0) = 1.0; // Global normal strength
 uniform sampler2D foam_noise_tex : repeat_enable, filter_linear_mipmap_anisotropic;
+// Scale the existing foam pattern independently of the FFT tile size.
+uniform float foam_texture_scale : hint_range(0.5, 8.0) = 3.0;
 
 uniform sampler2D depth_texture : hint_depth_texture, filter_linear_mipmap;
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
@@ -64,37 +66,6 @@ varying float wave_height;
 varying float fresnel;
 varying float surface_roughness;
 
-/** Filter weights for a cubic B-spline. */
-vec4 cubic_weights(float a) {
-	float a2 = a*a;
-	float a3 = a2*a;
-
-	float w0 =-a3     + a2*3.0 - a*3.0 + 1.0;
-	float w1 = a3*3.0 - a2*6.0         + 4.0;
-	float w2 =-a3*3.0 + a2*3.0 + a*3.0 + 1.0;
-	float w3 = a3;
-	return vec4(w0, w1, w2, w3) / 6.0;
-}
-
-/** Performs bicubic B-spline filtering on the provided sampler. */
-// Source: https://developer.nvidia.com/gpugems/gpugems2/part-iii-high-quality-rendering/chapter-20-fast-third-order-texture-filtering
-vec4 texture_bicubic(in sampler2DArray sampler, in vec3 uvw) {
-	vec2 dims = vec2(textureSize(sampler, 0).xy);
-	vec2 dims_inv = 1.0 / dims;
-	uvw.xy = uvw.xy*dims + 0.5;
-
-	vec2 fuv = fract(uvw.xy);
-	vec4 wx = cubic_weights(fuv.x);
-	vec4 wy = cubic_weights(fuv.y);
-
-	vec4 g = vec4(wx.xz + wx.yw, wy.xz + wy.yw);
-	vec4 h = (vec4(wx.yw, wy.yw) / g + vec2(-1.5, 0.5).xyxy + floor(uvw.xy).xxyy)*dims_inv.xxyy;
-	vec2 w = g.xz / (g.xz + g.yw);
-	return mix(
-		mix(textureLod(sampler, vec3(h.yw, uvw.z), 0.0), textureLod(sampler, vec3(h.xw, uvw.z), 0.0), w.x),
-		mix(textureLod(sampler, vec3(h.yz, uvw.z), 0.0), textureLod(sampler, vec3(h.xz, uvw.z), 0.0), w.x), w.y);
-}
-
 // Sum FFT cascades on the clipmap, then pass the surface coordinates to the foam pass.
 void vertex() {
 	UV = VERTEX.xz;
@@ -106,11 +77,8 @@ void vertex() {
 		for (uint i = 0U; i < num_cascades; ++i) {
 			vec4 scales = map_scales[i];
 			vec3 coords = vec3(UV * scales.xy, float(i));
-			// Smooth nearby texel transitions; distant vertices keep one cheap lookup.
+			// Bilinear sampling retains the FFT's small crests without a blur kernel.
 			vec3 sample_value = textureLod(displacements, coords, 0.0).xyz;
-			if (distance_cam < 24.0) {
-				sample_value = mix(texture_bicubic(displacements, coords).xyz, sample_value, smoothstep(12.0, 24.0, distance_cam));
-			}
 			displacement += sample_value * scales.z;
 		}
 		VERTEX += displacement * distance_factor;
@@ -123,9 +91,11 @@ vec4 filtered_wave_data(vec3 coords, float map_size) {
 	vec2 dx = dFdx(coords.xy);
 	vec2 dy = dFdy(coords.xy);
 	float footprint = max(length(dx), length(dy)) * map_size;
-	// Magnification needs smooth interpolation, regardless of the tile's size.
-	if (footprint <= 0.75) {
-		return texture_bicubic(normals, coords);
+	// Preserve the original texel values during magnification. A cubic B-spline
+	// smooths away the very short waves that a close camera should reveal.
+	vec4 sharp_sample = textureLod(normals, coords, 0.0);
+	if (footprint <= 1.0) {
+		return sharp_sample;
 	}
 	// The compute map has no mip chain. Four footprint samples soften distant
 	// normal/foam aliasing, while roughness filtering below handles tiny highlights.
@@ -136,10 +106,20 @@ vec4 filtered_wave_data(vec3 coords, float map_size) {
 		textureLod(normals, coords + vec3(dx - dy, 0.0), 0.0) +
 		textureLod(normals, coords + vec3(-dx + dy, 0.0), 0.0) +
 		textureLod(normals, coords - vec3(dx + dy, 0.0), 0.0));
-	if (footprint < 1.5) {
-		return mix(texture_bicubic(normals, coords), filtered, smoothstep(0.75, 1.5, footprint));
+	if (footprint < 2.0) {
+		return mix(sharp_sample, filtered, smoothstep(1.0, 2.0, footprint));
 	}
 	return filtered;
+}
+
+// Both kinds of foam use the same porous structure. A broad mask keeps patches
+// connected, while fine density varies their interiors instead of filling them white.
+float foam_from_density(float density, float structure, float grain, float edge) {
+	float threshold = mix(0.76, 0.34, density);
+	float patches = smoothstep(threshold - edge, threshold + edge, structure);
+	float core = smoothstep(threshold, threshold + 0.2, structure);
+	float froth = mix(0.35, 1.0, smoothstep(0.25, 0.72, grain));
+	return density * patches * mix(0.55, 1.0, core) * froth;
 }
 
 // Combine native wave foam, object history, scene-depth translucency, and ocean normals.
@@ -153,7 +133,7 @@ void fragment() {
 		vec4 scales = map_scales[i];
 		vec3 coords = vec3(UV*scales.xy, float(i));
 		gradient += filtered_wave_data(coords, map_size).xyw * vec3(scales.ww, 1.0);
-		foam_alpha += texture(foam_noise_tex, UV * scales.xy * 1.0).r;
+		foam_alpha += texture(foam_noise_tex, UV * scales.xy * foam_texture_scale).r;
 	}
 	float foam_factor = smoothstep(0.0, 1.0, gradient.z*0.75) * exp(-dist*0.0075);
 
@@ -193,29 +173,31 @@ void fragment() {
 	// Smooth saturation preserves strength differences instead of clipping an entire
 	// fresh trail to solid white. The coverage field already contains age and spreading.
 	float object_density = clamp(max(1.0 - exp(-max(0.0, interaction.r * interaction_foam_strength)), contact), 0.0, 1.0);
+	// Sample in stable wave coordinates, so the pattern rides the displaced water.
+	// Broad breakup avoids isolated cellular cutouts; finer froth gives both crests
+	// and wakes translucent filaments between their denser white interiors.
+	vec2 foam_uv = UV * map_scales[0].xy * foam_texture_scale;
+	float broad = texture(foam_noise_tex, foam_uv * 0.35 + vec2(0.37, 0.61)).r;
+	float fine = texture(foam_noise_tex, foam_uv * 3.7 + vec2(0.17, 0.31)).r;
+	float foam_pattern = foam_alpha / max(float(num_cascades), 1.0);
+	float structure = mix(foam_pattern, broad, 0.45);
+	// A small transition in noise space preserves soft, ragged borders up close;
+	// the derivative widens it only when the pattern becomes smaller than a pixel.
+	float foam_edge = max(fwidth(structure), 0.06);
+	float wave_coverage = foam_from_density(foam_factor, structure, fine, foam_edge);
 	float object_coverage = 0.0;
-	if (object_density > 0.001 && num_cascades > 0U) {
-		// Reuse the wave foam texture on the same displaced surface. Broad patches
-		// interrupt the trail edges; finer froth gives the surviving patches structure.
-		vec2 foam_uv = UV * map_scales[0].xy;
-		float broad = texture(foam_noise_tex, foam_uv * 0.35 + vec2(0.37, 0.61)).r;
-		float fine = texture(foam_noise_tex, foam_uv * 3.7 + vec2(0.17, 0.31)).r;
-		float texture_value = mix(foam_alpha / float(num_cascades), broad, 0.45);
-		// As density fades, water openings grow through the foam. Stable wave UVs
-		// keep the patches coherent in motion, without a scrolling or flickering overlay.
-		float threshold = mix(0.58, 0.28, object_density);
-		float edge = max(fwidth(texture_value), 0.06);
-		float patches = smoothstep(threshold - edge, threshold + edge, texture_value);
-		float froth = mix(0.3, 1.0, smoothstep(0.28, 0.65, fine));
-		object_coverage = object_density * patches * froth * exp(-dist*0.0075);
+	if (num_cascades > 0U) {
+		object_coverage = foam_from_density(object_density, structure, fine, foam_edge) * exp(-dist*0.0075);
 	}
 	// Shared visible coverage drives every lighting term, including the clear water
 	// between foam patches. Max avoids a bright seam where wave and wake foam overlap.
-	foam_coverage = max(clamp(foam_factor * foam_alpha * foam_alpha, 0.0, 1.0), object_coverage);
+	foam_coverage = max(clamp(wave_coverage, 0.0, 1.0), object_coverage);
 	ALBEDO = mix(depth_water_color, foam_color.rgb, foam_coverage);
 	EMISSION = vec3(0.0);
 	ALPHA = mix(ALPHA, 1.0, foam_coverage);
-	gradient *= mix(0.015, normal_strength, exp(-dist*0.0175)); // Blend normal with terrain normal as distance increases.
+	// Keep the actual wave slopes through the foreground/middle distance.
+	// Pixel-footprint filtering above handles fine detail before the far fade.
+	gradient.xy *= normal_strength * mix(1.0, 0.05, smoothstep(40.0, 200.0, dist));
 	NORMAL = (VIEW_MATRIX * vec4(normalize(vec3(-gradient.x, 1.0, -gradient.y)), 0.0)).xyz;
 	// Filter specular detail as it shrinks below a screen pixel. Apply it to our
 	// custom sun lighting as well as Godot's environment reflections.

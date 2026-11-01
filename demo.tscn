@@ -47,7 +47,7 @@ elevation_degrees = 22.0
 [node name="GodotOceanWaves" parent="." unique_id=942576566 node_paths=PackedStringArray("player") instance=ExtResource("1_5hfv0")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.7769947, 0, 22.962461)
 player = NodePath("../Camera3D")
-water_color = Color(0.055, 0.26, 0.31, 1)
+water_color = Color(0.06, 0.2, 0.24, 1)
 foam_color = Color(0.93, 0.97, 1, 1)
 wind_speed = 5.0
 

@@ -158,11 +158,11 @@ These presets change the mesh geometry; the wave simulation, foam, and buoyancy 
 
 The First Person mesh is generated once and cached, with stitched ring boundaries to prevent cracks under wave displacement. It uses approximately 530,000 triangles, compared with 657,000 for High, and also works with third-person cameras.
 
-Nearby wave displacement and normals use bicubic sampling. Distant normal/foam samples are filtered over the screen pixel's footprint, and the shader increases highlight roughness when normal detail becomes too small to resolve. These filters reduce visible texel transitions and sparkling; they do not increase the FFT map resolution.
+Nearby wave displacement and normals use bilinear sampling to retain the FFT's small crests without an additional blur kernel. When a screen pixel covers multiple wave texels, the shader blends toward four samples across that pixel's footprint and increases highlight roughness to limit sparkling. Wave normals keep their full strength through the first 40 m, then gradually fade toward the horizon. These changes preserve existing wave detail; they do not increase the FFT map resolution.
 
-The surface uses the FFT wave normals and the shared wave/object foam pattern. Buoyancy samples the original FFT waves, with one default cascade and `foam_amount = 8.0`.
+Wave foam and object trails share a seamless **2048 × 2048 foam texture** with warped cellular borders that form a porous bubble network. Broad and fine samples of that same texture produce irregular patches with varied density: stronger foam has denser interiors, while weaker foam breaks into thin fragments with softer, antialiased edges. Both wave crests and boat wakes use the same coverage calculation. The advanced `foam_texture_scale` material parameter in [mat_water.tres](packages/godot_ocean_waves/assets/water/mat_water.tres) defaults to `3.0`: larger values make the foam pattern smaller in world space. The texture distortion is generated into the texture, and its pattern stays attached to the wave surface. Buoyancy samples the original FFT waves, with one default cascade and `foam_amount = 8.0`.
 
-The extra filtering adds shader work, even though the first-person mesh uses fewer triangles. Profile at your target screen resolution when choosing a quality preset. First-person rendering improvements cover the surface above water; they do not add an underwater rendering system.
+Close-up wave sampling uses fewer texture reads than the previous bicubic filter; distant filtering and the foam samples add shader work, and the larger foam texture uses more memory. Profile at your target screen resolution when choosing a quality preset. First-person rendering improvements cover the surface above water; they do not add an underwater rendering system.
 
 **Wave foam and spray.** Breaking waves generate surface foam and airborne spray. Object interactions reuse the ocean's foam texture, color, and existing particle system.
 
