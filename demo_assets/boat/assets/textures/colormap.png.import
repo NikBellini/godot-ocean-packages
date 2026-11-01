@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bybksel30huqv"
-path.s3tc="res://.godot/imported/colormap.png-26b226a6f4dbdd869e7c5f8a953601ea.s3tc.ctex"
+uid="uid://buwgyl6v1y5pd"
+path.s3tc="res://.godot/imported/colormap.png-f7ab1cea581fda47140ec711c30f2914.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -11,8 +11,8 @@ metadata={
 
 [deps]
 
-source_file="res://demo_assets/ship/assets/textures/colormap.png"
-dest_files=["res://.godot/imported/colormap.png-26b226a6f4dbdd869e7c5f8a953601ea.s3tc.ctex"]
+source_file="res://demo_assets/boat/assets/textures/colormap.png"
+dest_files=["res://.godot/imported/colormap.png-f7ab1cea581fda47140ec711c30f2914.s3tc.ctex"]
 
 [params]
 

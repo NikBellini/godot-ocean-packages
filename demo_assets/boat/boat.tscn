@@ -1,0 +1,51 @@
+[gd_scene format=3 uid="uid://c27qpmmtwnlew"]
+
+[ext_resource type="Script" uid="uid://bfo6a74jffl1o" path="res://packages/boat_system/boat_system.gd" id="1_le08a"]
+[ext_resource type="PackedScene" uid="uid://b04nw5lfhmhdf" path="res://demo_assets/boat/assets/boat-speed-b.glb" id="1_xrsce"]
+[ext_resource type="Script" uid="uid://difeajcrmwa3c" path="res://packages/boat_system/components/boat_buoyancy.gd" id="3_buoyancy"]
+[ext_resource type="Script" uid="uid://wh8vfblwg2af" path="res://packages/boat_system/components/boat_engine.gd" id="4_engine"]
+[ext_resource type="Script" uid="uid://c3mhlwgnlp6qd" path="res://packages/boat_system/utils/boat_player_input.gd" id="5_input"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_yxdru"]
+size = Vector3(1.6327438, 1.3591309, 3.0547943)
+
+[node name="Boat" type="RigidBody3D" unique_id=744783114]
+center_of_mass_mode = 1
+center_of_mass = Vector3(0, -0.5, 0)
+script = ExtResource("1_le08a")
+
+[node name="boat-speed-b2" parent="." unique_id=1919833679 instance=ExtResource("1_xrsce")]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1401080457]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.067020416, 0.93259686, 0.010154724)
+shape = SubResource("BoxShape3D_yxdru")
+
+[node name="Pontoons" type="Node3D" parent="." unique_id=250811644]
+script = ExtResource("3_buoyancy")
+radius = 0.58
+
+[node name="Pontoon1" type="Marker3D" parent="Pontoons" unique_id=995703769]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.5125842, 0.5597998, -1.1605656)
+
+[node name="Pontoon2" type="Marker3D" parent="Pontoons" unique_id=1052091446]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.513, 0.5597998, -1.1610581)
+
+[node name="Pontoon3" type="Marker3D" parent="Pontoons" unique_id=2030494581]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.5125842, 0.5597998, -0.0049231052)
+
+[node name="Pontoon4" type="Marker3D" parent="Pontoons" unique_id=386890485]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.513, 0.5597998, -0.005415559)
+
+[node name="Pontoon5" type="Marker3D" parent="Pontoons" unique_id=1743664268]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5597998, 1.1711276)
+
+[node name="Engine" type="Node3D" parent="." unique_id=1164894821]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.42791224, -0.72989655)
+script = ExtResource("4_engine")
+engine_acceleration = 30.0
+max_engine_speed = 20.0
+acceleration_pitch_strength = 1.21
+
+[node name="PlayerInput" type="Node3D" parent="." unique_id=139419866 node_paths=PackedStringArray("engine")]
+script = ExtResource("5_input")
+engine = NodePath("../Engine")

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bh2yjrmihx2iy"
-path="res://.godot/imported/ship_model.glb-e800960468cc15522a38863eeb7b3a52.scn"
+uid="uid://b04nw5lfhmhdf"
+path="res://.godot/imported/boat-speed-b.glb-b59353cddc3bf982244ef318464ecf04.scn"
 
 [deps]
 
-source_file="res://demo_assets/ship/assets/ship_model.glb"
-dest_files=["res://.godot/imported/ship_model.glb-e800960468cc15522a38863eeb7b3a52.scn"]
+source_file="res://demo_assets/boat/assets/boat-speed-b.glb"
+dest_files=["res://.godot/imported/boat-speed-b.glb-b59353cddc3bf982244ef318464ecf04.scn"]
 
 [params]
 

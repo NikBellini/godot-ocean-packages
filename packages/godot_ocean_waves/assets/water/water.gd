@@ -123,10 +123,13 @@ func _update_scales_uniform() -> void:
 		var uv_scale := Vector2.ONE / params.tile_length
 		map_scales[i] = Vector4(uv_scale.x, uv_scale.y, params.displacement_scale, params.normal_scale)
 	# No global shader parameter for arrays :(
-	WATER_MAT.set_shader_parameter(&'map_scales', map_scales)
+	var active_material := material_override as ShaderMaterial
+	if active_material != null:
+		active_material.set_shader_parameter(&'map_scales', map_scales)
 	SPRAY_MAT.set_shader_parameter(&'map_scales', map_scales)
 
 func _update_water(delta : float) -> void:
+	if parameters.is_empty(): return
 	if wave_generator == null: _setup_wave_generator()
 	wave_generator.update(delta, parameters)
 
@@ -177,6 +180,9 @@ func _manage_cpu_displacement_textures_updates(delta) -> void:
 # 		_update_cpu_displacement_textures(cascade_index)
 
 func _setup_cpu_displacement_textures() -> void:
+	_cpu_displacement_textures.clear()
+	if parameters.is_empty() or wave_generator == null:
+		return
 	# load first_n_cascades_for_collision_detection textures
 	var _actually_used_textures_idx:Array = []
 	for i in range(len(parameters)):
@@ -256,7 +262,12 @@ func get_height(world_pos:Vector3, steps:int=3) -> float:
 			if _cpu_displacement_textures[cascade_index] == null:
 				return 0.0
 			
-			y_raw = _cpu_displacement_textures[cascade_index].get_pixelv(img_v)
+			# At tile seams, floating-point rounding can produce exactly map_size.
+			# Wrap integer texels before reading so distant colliders cannot request
+			# pixel 1024 from a 1024-pixel displacement map.
+			var image: Image = _cpu_displacement_textures[cascade_index]
+			var pixel := Vector2i(posmod(int(img_v.x), image.get_width()), posmod(int(img_v.y), image.get_height()))
+			y_raw = image.get_pixelv(pixel)
 			y = Vector2(y_raw.r,y_raw.b)
 			x = world_pos_xz-y
 		summed_height += y_raw.g * displacement_scale
