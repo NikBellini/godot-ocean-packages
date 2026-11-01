@@ -7,9 +7,10 @@ const SPRAY_MAT := preload('res://packages/godot_ocean_waves/assets/water/mat_sp
 const WATER_MESH_HIGH8K := preload('res://packages/godot_ocean_waves/assets/water/clipmap_high_8k.obj')
 const WATER_MESH_HIGH := preload('res://packages/godot_ocean_waves/assets/water/clipmap_high.obj')
 const WATER_MESH_LOW := preload('res://packages/godot_ocean_waves/assets/water/clipmap_low.obj')
+const WATER_CLIPMAP := preload('res://packages/godot_ocean_waves/assets/water/water_clipmap.gd')
 
 
-enum MeshQuality { LOW, HIGH, HIGH8K }
+enum MeshQuality { LOW, HIGH, HIGH8K, FIRST_PERSON }
 
 @export_group('Wave Parameters')
 @export_color_no_alpha var water_color : Color = Color(0.1, 0.15, 0.18) :
@@ -43,7 +44,8 @@ enum MeshQuality { LOW, HIGH, HIGH8K }
 		map_size = value
 		_setup_wave_generator()
 
-@export var mesh_quality := MeshQuality.HIGH :
+## FIRST_PERSON concentrates geometry within 16 m of the viewer, with stitched LOD rings.
+@export var mesh_quality := MeshQuality.FIRST_PERSON :
 	set(value):
 		mesh_quality = value
 		if mesh_quality == MeshQuality.LOW:
@@ -52,6 +54,8 @@ enum MeshQuality { LOW, HIGH, HIGH8K }
 			mesh = WATER_MESH_HIGH
 		if mesh_quality == MeshQuality.HIGH8K:
 			mesh = WATER_MESH_HIGH8K
+		if mesh_quality == MeshQuality.FIRST_PERSON:
+			mesh = WATER_CLIPMAP.get_mesh()
 
 ## How many times the wave simulation should update per second.
 ## Note: This doesn't reduce the frame stutter caused by FFT calculation, only
@@ -78,6 +82,8 @@ func _init() -> void:
 	rng.set_seed(1234) # This seed gives big waves!
 
 func _ready() -> void:
+	# A scene may still have an imported mesh serialized in its Mesh property.
+	mesh_quality = mesh_quality
 	RenderingServer.global_shader_parameter_set(&'water_color', water_color.srgb_to_linear())
 	RenderingServer.global_shader_parameter_set(&'foam_color', foam_color.srgb_to_linear())
 

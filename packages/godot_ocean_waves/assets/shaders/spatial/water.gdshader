@@ -21,7 +21,15 @@ uniform vec3 depth_color_consumption = vec3(7.5, 22.0, 38.0);
 
 uniform float roughness : hint_range(0.0, 1.0) = 0.4;
 uniform float normal_strength : hint_range(0.0, 1.0) = 1.0; // Global normal strength
-uniform sampler2D foam_noise_tex : repeat_enable, filter_linear_mipmap;
+uniform sampler2D foam_noise_tex : repeat_enable, filter_linear_mipmap_anisotropic;
+
+group_uniforms surface_detail;
+// Small, mipmapped ripples shade the FFT surface without affecting buoyancy.
+uniform sampler2D detail_normal_tex : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
+uniform float ripple_strength : hint_range(0.0, 0.5) = 0.18;
+uniform float ripple_tile_size : hint_range(0.5, 10.0) = 2.5;
+uniform float foam_detail_strength : hint_range(0.0, 1.0) = 0.8;
+group_uniforms;
 
 uniform sampler2D depth_texture : hint_depth_texture, filter_linear_mipmap;
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
@@ -54,38 +62,15 @@ vec3 interaction_at(vec2 world_xz) {
 group_uniforms cascade_data;
 uniform vec4 map_scales[MAX_CASCADES];               // Scales for displacement/normal maps. Packed: [uv scale, displacement scale, normal scale]
 global uniform uint num_cascades;
-global uniform sampler2DArray displacements;         // Each layer represents one wave cascade.
-global uniform sampler2DArray normals : hint_normal; // Each layer represents one wave cascade.
+// FFT outputs have a single mip level. Filter these explicitly below instead of
+// requesting nonexistent mipmaps; detail/foam textures have their own mip chains.
+global uniform sampler2DArray displacements : repeat_enable, filter_linear;
+global uniform sampler2DArray normals : hint_normal, repeat_enable, filter_linear;
 
 
 varying float wave_height;
 varying float fresnel;
-
-// Sum FFT cascades on the clipmap, then pass the surface coordinates to the foam pass.
-void vertex() {
-	UV = VERTEX.xz;
-	// Distant clipmap rings need fewer details; gradually stop FFT displacement after 512 m.
-	float distance_cam = length(VERTEX.xz - CAMERA_POSITION_WORLD.xz);
-	if (distance_cam < 1024.0) // fall of to 0 at 600 meters
-	{
-		float distance_factor = min(exp(-(distance_cam-512.0)*0.007), 1.0);
-
-		// Read displacements from displacement maps.
-		vec3 displacement = vec3(0);
-		for (uint i = 0U; i < num_cascades; ++i) {
-			vec4 scales = map_scales[i];
-			displacement += texture(displacements, vec3(UV*scales.xy, float(i))).xyz * scales.z;
-		}
-		VERTEX += displacement * distance_factor;
-		wave_height = displacement.y;
-	}
-	else
-	{
-		wave_height = 0.0;
-	}
-	// Sample after the FFT's horizontal displacement so trails stay in world space.
-	surface_world_xz = VERTEX.xz;
-}
+varying float surface_roughness;
 
 /** Filter weights for a cubic B-spline. */
 vec4 cubic_weights(float a) {
@@ -113,25 +98,69 @@ vec4 texture_bicubic(in sampler2DArray sampler, in vec3 uvw) {
 	vec4 g = vec4(wx.xz + wx.yw, wy.xz + wy.yw);
 	vec4 h = (vec4(wx.yw, wy.yw) / g + vec2(-1.5, 0.5).xyxy + floor(uvw.xy).xxyy)*dims_inv.xxyy;
 	vec2 w = g.xz / (g.xz + g.yw);
-    return mix(
-		mix(texture(sampler, vec3(h.yw, uvw.z)), texture(sampler, vec3(h.xw, uvw.z)), w.x),
-		mix(texture(sampler, vec3(h.yz, uvw.z)), texture(sampler, vec3(h.xz, uvw.z)), w.x), w.y);
+	return mix(
+		mix(textureLod(sampler, vec3(h.yw, uvw.z), 0.0), textureLod(sampler, vec3(h.xw, uvw.z), 0.0), w.x),
+		mix(textureLod(sampler, vec3(h.yz, uvw.z), 0.0), textureLod(sampler, vec3(h.xz, uvw.z), 0.0), w.x), w.y);
+}
+
+// Sum FFT cascades on the clipmap, then pass the surface coordinates to the foam pass.
+void vertex() {
+	UV = VERTEX.xz;
+	float distance_cam = length(VERTEX.xz - CAMERA_POSITION_WORLD.xz);
+	wave_height = 0.0;
+	if (distance_cam < 1024.0) {
+		float distance_factor = min(exp(-(distance_cam - 512.0) * 0.007), 1.0);
+		vec3 displacement = vec3(0.0);
+		for (uint i = 0U; i < num_cascades; ++i) {
+			vec4 scales = map_scales[i];
+			vec3 coords = vec3(UV * scales.xy, float(i));
+			// Smooth nearby texel transitions; distant vertices keep one cheap lookup.
+			vec3 sample_value = textureLod(displacements, coords, 0.0).xyz;
+			if (distance_cam < 24.0) {
+				sample_value = mix(texture_bicubic(displacements, coords).xyz, sample_value, smoothstep(12.0, 24.0, distance_cam));
+			}
+			displacement += sample_value * scales.z;
+		}
+		VERTEX += displacement * distance_factor;
+		wave_height = displacement.y;
+	}
+	surface_world_xz = VERTEX.xz;
+}
+
+vec4 filtered_wave_data(vec3 coords, float map_size) {
+	vec2 dx = dFdx(coords.xy);
+	vec2 dy = dFdy(coords.xy);
+	float footprint = max(length(dx), length(dy)) * map_size;
+	// Magnification needs smooth interpolation, regardless of the tile's size.
+	if (footprint <= 0.75) {
+		return texture_bicubic(normals, coords);
+	}
+	// The compute map has no mip chain. Four footprint samples soften distant
+	// normal/foam aliasing, while roughness filtering below handles tiny highlights.
+	dx *= 0.25;
+	dy *= 0.25;
+	vec4 filtered = 0.25 * (
+		textureLod(normals, coords + vec3(dx + dy, 0.0), 0.0) +
+		textureLod(normals, coords + vec3(dx - dy, 0.0), 0.0) +
+		textureLod(normals, coords + vec3(-dx + dy, 0.0), 0.0) +
+		textureLod(normals, coords - vec3(dx + dy, 0.0), 0.0));
+	if (footprint < 1.5) {
+		return mix(texture_bicubic(normals, coords), filtered, smoothstep(0.75, 1.5, footprint));
+	}
+	return filtered;
 }
 
 // Combine native wave foam, object history, scene-depth translucency, and ocean normals.
 void fragment() {
 	float map_size = float(textureSize(normals, 0).x);
-	float dist = length(VERTEX.xz);
+	float dist = length(VERTEX);
 	// Read foam and normal information from normal maps.
 	vec3 gradient = vec3(0);
 	float foam_alpha = 0.0;
 	for (uint i = 0U; i < num_cascades; ++i) {
 		vec4 scales = map_scales[i];
 		vec3 coords = vec3(UV*scales.xy, float(i));
-		float ppm = map_size * min(scales.x, scales.y); // Pixels per meter
-		// Mix between bicubic and bilinear filtering depending on the world space pixels per meter.
-		// This is dependent on the tile size as well as displacement/normal map resolution.
-		gradient += mix(texture_bicubic(normals, coords), texture(normals, coords), min(1.0, ppm*0.1)).xyw * vec3(scales.ww, 1.0);
+		gradient += filtered_wave_data(coords, map_size).xyw * vec3(scales.ww, 1.0);
 		foam_alpha += texture(foam_noise_tex, UV * scales.xy * 1.0).r;
 	}
 	float foam_factor = smoothstep(0.0, 1.0, gradient.z*0.75) * exp(-dist*0.0075);
@@ -191,23 +220,42 @@ void fragment() {
 	// Shared visible coverage drives every lighting term, including the clear water
 	// between foam patches. Max avoids a bright seam where wave and wake foam overlap.
 	foam_coverage = max(clamp(foam_factor * foam_alpha * foam_alpha, 0.0, 1.0), object_coverage);
+	// Centimeter-scale froth breaks up enlarged white patches in first person.
+	// Both wave foam and boat trails use this same world-locked, filtered detail.
+	float detail_fade = 1.0 - smoothstep(12.0, 60.0, dist);
+	float fine_froth = texture(foam_noise_tex, UV * 0.16 + vec2(0.13, 0.47)).r;
+	foam_coverage *= mix(1.0, mix(0.2, 1.0, smoothstep(0.4, 0.65, fine_froth)), foam_detail_strength * detail_fade);
 	ALBEDO = mix(depth_water_color, foam_color.rgb, foam_coverage);
 	EMISSION = vec3(0.0);
 	ALPHA = mix(ALPHA, 1.0, foam_coverage);
-	// Shared coverage makes both kinds of foam opaque and suppresses water highlights.
-	fresnel = mix(pow(1.0 - dot(VIEW, NORMAL), 5.0*exp(-2.69*roughness)) / (1.0 + 22.7*pow(roughness, 1.5)), 1.0, REFLECTANCE);
-	ROUGHNESS = clamp((1.0 - fresnel) * foam_coverage + 0.4, 0.0, 1.0);
-	
 	gradient *= mix(0.015, normal_strength, exp(-dist*0.0175)); // Blend normal with terrain normal as distance increases.
+	// Two slowly drifting orientations prevent a visibly scrolling, repeated sheet.
+	vec2 ripple_uv = UV / ripple_tile_size;
+	vec3 ripple_a = texture(detail_normal_tex, ripple_uv + TIME * vec2(0.013, -0.009)).xyz * 2.0 - 1.0;
+	vec3 ripple_b = texture(detail_normal_tex, vec2(-ripple_uv.y, ripple_uv.x) * 1.37 + TIME * vec2(-0.007, 0.011)).xyz * 2.0 - 1.0;
+	vec2 ripple_slope = ripple_a.xy / max(ripple_a.z, 0.25);
+	vec2 rotated_slope = ripple_b.xy / max(ripple_b.z, 0.25);
+	ripple_slope = (ripple_slope + vec2(rotated_slope.y, -rotated_slope.x)) * 0.5;
+	gradient.xy += ripple_slope * ripple_strength * detail_fade * (1.0 - foam_coverage * 0.85);
 	NORMAL = (VIEW_MATRIX * vec4(normalize(vec3(-gradient.x, 1.0, -gradient.y)), 0.0)).xyz;
-
+	// Filter specular detail as it shrinks below a screen pixel. Apply it to our
+	// custom sun lighting as well as Godot's environment reflections.
+	vec3 normal_dx = dFdx(NORMAL);
+	vec3 normal_dy = dFdy(NORMAL);
+	float variance = dot(normal_dx, normal_dx) + dot(normal_dy, normal_dy);
+	float filtered_variance = min(variance * 0.5, 0.25);
+	surface_roughness = clamp(sqrt(roughness * roughness + filtered_variance), 0.06, 1.0);
+	// Preserve the original 0.4 environment roughness, adding the same filter variance.
+	ROUGHNESS = mix(sqrt(0.16 + filtered_variance), 1.0, foam_coverage);
+	// Fresnel must use the final wave/ripple normal, rather than the flat mesh normal.
+	float view_cos = clamp(dot(VIEW, NORMAL), 0.0, 1.0);
+	fresnel = mix(pow(1.0 - view_cos, 5.0 * exp(-2.69 * surface_roughness)) / (1.0 + 22.7 * pow(surface_roughness, 1.5)), 1.0, REFLECTANCE);
 }
 
 // Approximate masking between microscopic surface facets for the custom water lighting.
 float smith_masking_shadowing(in float cos_theta, in float alpha) {
-	float a = cos_theta / (alpha * sqrt(1.0 - cos_theta*cos_theta)); // Approximate: 1.0 / (alpha * tan(acos(cos_theta)))
-	float a_sq = a*a;
-	return a < 1.6 ? (1.0 - 1.259*a + 0.396*a_sq) / (3.535*a + 2.181*a_sq) : 0.0;
+	float cos_sq = clamp(cos_theta * cos_theta, 1e-5, 1.0);
+	return 0.5 * (sqrt(1.0 + alpha * alpha * (1.0 - cos_sq) / cos_sq) - 1.0);
 }
 
 // Source: https://github.com/godotengine/godot/blob/7b56111c297f24304eb911fe75082d8cdc3d4141/drivers/gles3/shaders/scene.glsl#L995
@@ -225,11 +273,11 @@ void light() {
 	float dot_nv = max(dot(NORMAL, VIEW), 2e-5);
 
 	// --- SPECULAR ---
-	float light_mask = smith_masking_shadowing(roughness, dot_nv);
-	float view_mask = smith_masking_shadowing(roughness, dot_nl);
-	float microfacet_distribution = ggx_distribution(dot(NORMAL, halfway), roughness);
+	float light_mask = smith_masking_shadowing(dot_nv, surface_roughness);
+	float view_mask = smith_masking_shadowing(dot_nl, surface_roughness);
+	float microfacet_distribution = ggx_distribution(max(dot(NORMAL, halfway), 0.0), surface_roughness);
 	float geometric_attenuation = 1.0 / (1.0 + light_mask + view_mask);
-	SPECULAR_LIGHT += fresnel * microfacet_distribution * geometric_attenuation / (4.0 * dot_nv + 0.1) * ATTENUATION * (1.0 - foam_coverage * 0.9);
+	SPECULAR_LIGHT += fresnel * microfacet_distribution * geometric_attenuation / (4.0 * dot_nv + 0.1) * ATTENUATION * LIGHT_COLOR * (1.0 - foam_coverage * 0.9);
 
 	// --- DIFFUSE ---
 	const vec3 sss_modifier = vec3(0.9,1.15,0.85); // Subsurface scattering produces a 'greener' color.
@@ -238,5 +286,5 @@ void light() {
 	float lambertian = 0.5*dot_nl;
 	// ALBEDO already supplies the foam color. Tinting it again here would square
 	// that color and make the foam muddy. Only actual foam replaces water transmission.
-	DIFFUSE_LIGHT += mix((sss_height + sss_near) * sss_modifier / (1.0 + light_mask) + lambertian, vec3(dot_nl), foam_coverage) * (1.0 - fresnel) * ATTENUATION * LIGHT_COLOR;
+	DIFFUSE_LIGHT += mix((sss_height + sss_near) * sss_modifier + lambertian, vec3(dot_nl), foam_coverage) * (1.0 - fresnel) * ATTENUATION * LIGHT_COLOR;
 }

@@ -147,6 +147,22 @@ Disable height queries when your scene does not need buoyancy, height-based game
 
 **Large ocean meshes.** The package includes clipmap meshes with multiple levels of detail, including an 8 km variant. They retain more geometric detail near the camera and use coarser geometry farther away. Mesh quality, displacement falloff, and rendering settings determine the effective visual coverage.
 
+**First-person surface detail.** The default `Water > Mesh Quality` is **First Person**. This generates and caches a 512 m wide clipmap with 12.5 cm vertex spacing in its central 32 m square, then progressively coarser rings. The ring boundaries are stitched so wave displacement does not open cracks between levels. It concentrates detail around the viewer while using approximately 530,000 triangles, compared with 657,000 for the existing **High** mesh. **Low**, **High**, and **High8K** remain available. Assign the actual viewing camera as the ocean's **Player** to keep the detailed region around it.
+
+Nearby wave displacement and normals use bicubic sampling. Distant normal/foam samples are filtered over the screen pixel's footprint, and the shader increases highlight roughness when normal detail becomes too small to resolve. These filters reduce visible texel transitions and sparkling; they do not increase the FFT map resolution.
+
+The water material adds two slowly moving, mipmapped ripple samples and finer foam breakup shared by wave crests and object trails. Ripple shading fades between 12 m and 60 m from the camera and is suppressed beneath foam. These small ripples affect appearance only; buoyancy continues to use the original FFT waves, with one default cascade and `foam_amount = 8.0`.
+
+Tune **Surface Detail** on [mat_water.tres](packages/godot_ocean_waves/assets/water/mat_water.tres):
+
+| Shader parameter | Default | Purpose |
+| --- | --- | --- |
+| `ripple_strength` | `0.18` | Strength of the small surface normals; `0` disables their contribution. |
+| `ripple_tile_size` | `2.5` m | World-space repeat size of the first ripple layer; the second uses a different orientation and scale. |
+| `foam_detail_strength` | `0.8` | Fine breakup within nearby foam; `0` leaves the broader foam pattern. |
+
+The extra filtering and detail samples add shader work, even though the first-person mesh uses fewer triangles. Profile at your target screen resolution when choosing a quality preset. First-person rendering improvements cover the surface above water; they do not add an underwater rendering system.
+
 **Wave foam and spray.** Breaking waves generate surface foam and airborne spray. Object interactions reuse the ocean's foam texture, color, and existing particle system.
 
 **Waterline fade.** Scene depth softens the transition where the water intersects opaque geometry.
