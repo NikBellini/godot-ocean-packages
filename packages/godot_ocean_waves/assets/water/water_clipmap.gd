@@ -83,7 +83,9 @@ func _add_cell(origin: Vector2i, step_units: int, inner_units: int) -> void:
 		var start := corners[edge_index]
 		var end := corners[(edge_index + 1) % 4]
 		if edge_index == split_edge:
-			var midpoint := _vertex(start + (end - start) / 2)
+			# Ring edges span even grid units, so halving each component is exact.
+			var edge_delta := end - start
+			var midpoint := _vertex(start + Vector2i(edge_delta.x >> 1, edge_delta.y >> 1))
 			_indices.append_array(PackedInt32Array([center, _vertex(start), midpoint, center, midpoint, _vertex(end)]))
 		else:
 			_indices.append_array(PackedInt32Array([center, _vertex(start), _vertex(end)]))

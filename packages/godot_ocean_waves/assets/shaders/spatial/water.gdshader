@@ -23,14 +23,6 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.4;
 uniform float normal_strength : hint_range(0.0, 1.0) = 1.0; // Global normal strength
 uniform sampler2D foam_noise_tex : repeat_enable, filter_linear_mipmap_anisotropic;
 
-group_uniforms surface_detail;
-// Small, mipmapped ripples shade the FFT surface without affecting buoyancy.
-uniform sampler2D detail_normal_tex : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
-uniform float ripple_strength : hint_range(0.0, 0.5) = 0.18;
-uniform float ripple_tile_size : hint_range(0.5, 10.0) = 2.5;
-uniform float foam_detail_strength : hint_range(0.0, 1.0) = 0.8;
-group_uniforms;
-
 uniform sampler2D depth_texture : hint_depth_texture, filter_linear_mipmap;
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
 
@@ -63,7 +55,7 @@ group_uniforms cascade_data;
 uniform vec4 map_scales[MAX_CASCADES];               // Scales for displacement/normal maps. Packed: [uv scale, displacement scale, normal scale]
 global uniform uint num_cascades;
 // FFT outputs have a single mip level. Filter these explicitly below instead of
-// requesting nonexistent mipmaps; detail/foam textures have their own mip chains.
+// requesting nonexistent mipmaps; the foam texture has its own mip chain.
 global uniform sampler2DArray displacements : repeat_enable, filter_linear;
 global uniform sampler2DArray normals : hint_normal, repeat_enable, filter_linear;
 
@@ -220,23 +212,10 @@ void fragment() {
 	// Shared visible coverage drives every lighting term, including the clear water
 	// between foam patches. Max avoids a bright seam where wave and wake foam overlap.
 	foam_coverage = max(clamp(foam_factor * foam_alpha * foam_alpha, 0.0, 1.0), object_coverage);
-	// Centimeter-scale froth breaks up enlarged white patches in first person.
-	// Both wave foam and boat trails use this same world-locked, filtered detail.
-	float detail_fade = 1.0 - smoothstep(12.0, 60.0, dist);
-	float fine_froth = texture(foam_noise_tex, UV * 0.16 + vec2(0.13, 0.47)).r;
-	foam_coverage *= mix(1.0, mix(0.2, 1.0, smoothstep(0.4, 0.65, fine_froth)), foam_detail_strength * detail_fade);
 	ALBEDO = mix(depth_water_color, foam_color.rgb, foam_coverage);
 	EMISSION = vec3(0.0);
 	ALPHA = mix(ALPHA, 1.0, foam_coverage);
 	gradient *= mix(0.015, normal_strength, exp(-dist*0.0175)); // Blend normal with terrain normal as distance increases.
-	// Two slowly drifting orientations prevent a visibly scrolling, repeated sheet.
-	vec2 ripple_uv = UV / ripple_tile_size;
-	vec3 ripple_a = texture(detail_normal_tex, ripple_uv + TIME * vec2(0.013, -0.009)).xyz * 2.0 - 1.0;
-	vec3 ripple_b = texture(detail_normal_tex, vec2(-ripple_uv.y, ripple_uv.x) * 1.37 + TIME * vec2(-0.007, 0.011)).xyz * 2.0 - 1.0;
-	vec2 ripple_slope = ripple_a.xy / max(ripple_a.z, 0.25);
-	vec2 rotated_slope = ripple_b.xy / max(ripple_b.z, 0.25);
-	ripple_slope = (ripple_slope + vec2(rotated_slope.y, -rotated_slope.x)) * 0.5;
-	gradient.xy += ripple_slope * ripple_strength * detail_fade * (1.0 - foam_coverage * 0.85);
 	NORMAL = (VIEW_MATRIX * vec4(normalize(vec3(-gradient.x, 1.0, -gradient.y)), 0.0)).xyz;
 	// Filter specular detail as it shrinks below a screen pixel. Apply it to our
 	// custom sun lighting as well as Godot's environment reflections.
@@ -247,7 +226,7 @@ void fragment() {
 	surface_roughness = clamp(sqrt(roughness * roughness + filtered_variance), 0.06, 1.0);
 	// Preserve the original 0.4 environment roughness, adding the same filter variance.
 	ROUGHNESS = mix(sqrt(0.16 + filtered_variance), 1.0, foam_coverage);
-	// Fresnel must use the final wave/ripple normal, rather than the flat mesh normal.
+	// Fresnel must use the final wave normal, rather than the flat mesh normal.
 	float view_cos = clamp(dot(VIEW, NORMAL), 0.0, 1.0);
 	fresnel = mix(pow(1.0 - view_cos, 5.0 * exp(-2.69 * surface_roughness)) / (1.0 + 22.7 * pow(surface_roughness, 1.5)), 1.0, REFLECTANCE);
 }
