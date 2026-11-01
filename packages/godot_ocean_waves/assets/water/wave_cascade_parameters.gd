@@ -30,7 +30,7 @@ signal scale_changed
 ## Modifies how steep a wave needs to be before foam can accumulate.
 @export_range(0, 2) var whitecap := 0.5 : # Note: 'Wispier' foam can be created by increasing the 'foam_amount' and decreasing the 'whitecap' parameters.
 	set(value): whitecap = value; should_generate_spectrum = true; _whitecap = [value]
-@export_range(0, 10) var foam_amount := 5.0 :
+@export_range(0, 10) var foam_amount := 8.0 :
 	set(value): foam_amount = value; should_generate_spectrum = true; _foam_amount = [value]
 
 var spectrum_seed := Vector2i.ZERO

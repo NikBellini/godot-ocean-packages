@@ -13,7 +13,6 @@
 
 [sub_resource type="Resource" id="Resource_ycdy4"]
 script = ExtResource("5_g55gr")
-foam_amount = 7.0
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_k6xhe"]
 
@@ -27,6 +26,7 @@ shader = ExtResource("6_5cnr7")
 shader_parameter/max_alpha = 0.666
 shader_parameter/albedo_texture = ExtResource("7_enafo")
 shader_parameter/dissolve_texture = SubResource("NoiseTexture2D_tsx6q")
+shader_parameter/contact_spray_opacity = 0.65
 
 [sub_resource type="QuadMesh" id="QuadMesh_06d3e"]
 
